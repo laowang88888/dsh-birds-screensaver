@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DeepSeek Harness 锁屏 · 预览</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05070d; overflow: hidden; font-family: system-ui, 'Segoe UI', sans-serif; }
+  .root { position: fixed; inset: 0; background: #05070d; }
+  canvas { position: absolute; inset: 0; width: 100vw; height: 100vh; display: block; }
+  .panel { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: #e8eef5; }
+  .icon { font-size: 36px; filter: drop-shadow(0 0 18px rgba(120,200,255,.5)); }
+  .title { font-size: 15px; letter-spacing: 2px; color: rgba(255,255,255,.75); }
+  .sub { font-size: 12.5px; color: rgba(255,255,255,.38); }
+  input { width: 220px; padding: 9px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: #fff; font-size: 13px; outline: none; text-align: center; }
+  input:focus { border-color: rgba(120,200,255,.55); box-shadow: 0 0 0 3px rgba(120,200,255,.12); }
+  button { padding: 8px 22px; border-radius: 8px; border: 1px solid rgba(120,200,255,.35); background: rgba(120,200,255,.12); color: #cfe6ff; font-size: 13px; cursor: pointer; }
+  button:hover { background: rgba(120,200,255,.2); }
+  .ghost { border-color: rgba(255,255,255,.18); background: transparent; color: rgba(255,255,255,.55); }
+  .err { font-size: 12px; color: #ff7b7b; min-height: 16px; }
+  .ok { font-size: 12px; color: #7bffb0; min-height: 16px; }
+  .foot { position: absolute; bottom: 24px; left: 0; right: 0; text-align: center; font-size: 12px; color: rgba(255,255,255,.25); }
+  .link { color: rgba(120,200,255,.55); cursor: pointer; text-decoration: underline; }
+  .modal { position: absolute; inset: 0; z-index: 5; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.5); backdrop-filter: blur(4px); }
+  .modal.open { display: flex; }
+  .box { display: flex; flex-direction: column; gap: 10px; padding: 22px; border-radius: 12px; background: #0d1420; border: 1px solid rgba(255,255,255,.1); box-shadow: 0 18px 50px rgba(0,0,0,.6); min-width: 280px; }
+  .boxtitle { font-size: 14px; color: rgba(255,255,255,.8); text-align: center; letter-spacing: 1px; }
+  .row { display: flex; gap: 10px; justify-content: center; }
+</style>
+</head>
+<body>
+<div class="root" id="root">
+  <canvas id="c"></canvas>
+  <div class="panel" id="panel">
+    <div class="icon">🔒</div>
+    <div class="title">DeepSeek Harness 已锁定</div>
+    <div class="sub" id="sub">输入密码解锁（默认密码 1234，可在下方修改）</div>
+    <input id="pw" type="password" placeholder="输入密码" autocomplete="off" />
+    <button id="unlock" type="button">解锁</button>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="foot"><span>Ctrl+Shift+L 锁定</span> · <span class="link" id="setpw">修改密码</span></div>
+
+  <div class="modal" id="modal">
+    <div class="box">
+      <div class="boxtitle">修改密码</div>
+      <input id="cur" type="password" placeholder="当前密码" autocomplete="off" />
+      <input id="new1" type="password" placeholder="新密码（至少 4 位）" autocomplete="off" />
+      <input id="new2" type="password" placeholder="确认新密码" autocomplete="off" />
+      <div class="err" id="pwerr"></div>
+      <div class="row">
+        <button id="pwsave" type="button">保存</button>
+        <button id="pwcancel" type="button" class="ghost">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* 灵感来自 cbirds（clainstone/cbirds, MIT）：多 flock、鹰、品牌字样 + 锁屏/改密 */
+(function () {
+  const DEFAULT_PASSWORD = '1234';
+  let password = DEFAULT_PASSWORD;
+  let isDefault = true;
+
+  /* ---------- boids ---------- */
+  const canvas = document.getElementById('c');
+  const g = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let w = 0, h = 0, raf = 0, last = 0;
+  const mouse = { x: -1e4, y: -1e4 };
+
+  const FLOCKS = [
+    { hue: 196, sat: 86, lig: 64 },
+    { hue: 30, sat: 93, lig: 60 },
+    { hue: 274, sat: 80, lig: 68 }
+  ];
+  const N = 420, HAWK_COUNT = 2;
+  const birds = [], hawks = [];
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  function resize() {
+    w = window.innerWidth; h = window.innerHeight;
+    canvas.width = Math.max(1, Math.floor(w * dpr));
+    canvas.height = Math.max(1, Math.floor(h * dpr));
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = '#05070d';
+    g.fillRect(0, 0, w, h);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  for (let i = 0; i < N; i++) {
+    const f = i % FLOCKS.length; const pal = FLOCKS[f];
+    birds.push({ x: rand(0, w), y: rand(0, h), vx: rand(-1.2, 1.2), vy: rand(-1.2, 1.2),
+      z: Math.random(), flock: f, hue: (pal.hue + rand(-9, 9) + 360) % 360,
+      sat: pal.sat, lig: pal.lig, size: rand(1.5, 3.0) });
+  }
+  for (let i = 0; i < HAWK_COUNT; i++) {
+    hawks.push({ x: rand(0, w), y: rand(0, h), vx: rand(-2, 2), vy: rand(-2, 2), size: rand(3.2, 4.2) });
+  }
+
+  const PERCEPTION = 64, SEPARATION = 28, MAX_SPEED = 2.6, MAX_FORCE = 0.07;
+  const HAWK_SPEED = 3.7, HAWK_FORCE = 0.085, HAWK_HUNT = 420, HAWK_FLEE = 190;
+
+  function limit(x, y, max) {
+    const m = Math.hypot(x, y);
+    if (m > max && m > 0) return [x / m * max, y / m * max];
+    return [x, y];
+  }
+
+  function drawBird(b) {
+    const ang = Math.atan2(b.vy, b.vx);
+    const s = b.size * (0.55 + 0.9 * b.z);
+    const alpha = 0.3 + 0.62 * b.z;
+    g.save(); g.translate(b.x, b.y); g.rotate(ang);
+    g.fillStyle = `hsla(${b.hue},${b.sat}%,${b.lig}%,${alpha})`;
+    g.beginPath(); g.moveTo(s * 2.1, 0); g.lineTo(-s, s * 0.85); g.lineTo(-s * 0.55, 0); g.lineTo(-s, -s * 0.85); g.closePath(); g.fill();
+    g.restore();
+  }
+  function drawHawk(hk) {
+    const ang = Math.atan2(hk.vy, hk.vx);
+    g.save(); g.translate(hk.x, hk.y); g.rotate(ang);
+    g.shadowColor = 'hsla(0,95%,60%,0.85)'; g.shadowBlur = 14;
+    g.fillStyle = 'hsla(0,95%,58%,0.95)';
+    const s = hk.size;
+    g.beginPath(); g.moveTo(s * 3.2, 0); g.lineTo(-s * 1.4, s * 1.25); g.lineTo(-s * 0.5, 0); g.lineTo(-s * 1.4, -s * 1.25); g.closePath(); g.fill();
+    g.restore();
+  }
+
+  function step(now) {
+    const dt = Math.min(48, now - last || 16); last = now;
+    const k = dt / 16.67;
+    g.fillStyle = 'rgba(5,7,13,0.26)'; g.fillRect(0, 0, w, h);
+
+    for (let i = 0; i < N; i++) {
+      const b = birds[i];
+      let sepX = 0, sepY = 0, aliX = 0, aliY = 0, cohX = 0, cohY = 0;
+      let nSep = 0, nAli = 0, nCoh = 0;
+      for (let j = 0; j < N; j++) {
+        if (j === i) continue;
+        const o = birds[j];
+        const dx = o.x - b.x, dy = o.y - b.y, d2 = dx * dx + dy * dy;
+        if (d2 > PERCEPTION * PERCEPTION || d2 < 0.0001) continue;
+        if (d2 < SEPARATION * SEPARATION) { nSep++; sepX -= dx / d2; sepY -= dy / d2; }
+        if (o.flock === b.flock) { nAli++; aliX += o.vx; aliY += o.vy; nCoh++; cohX += dx; cohY += dy; }
+      }
+      let ax = 0, ay = 0;
+      if (nSep > 0) { const [x, y] = limit(sepX, sepY, MAX_FORCE * 2.2); ax += x; ay += y; }
+      if (nAli > 0) { const [x, y] = limit(aliX / nAli - b.vx, aliY / nAli - b.vy, MAX_FORCE); ax += x; ay += y; }
+      if (nCoh > 0) { const [x, y] = limit(cohX / nCoh * 0.02 - b.vx, cohY / nCoh * 0.02 - b.vy, MAX_FORCE * 0.9); ax += x; ay += y; }
+      for (const hk of hawks) {
+        const hdx = b.x - hk.x, hdy = b.y - hk.y, hd2 = hdx * hdx + hdy * hdy;
+        if (hd2 < HAWK_FLEE * HAWK_FLEE && hd2 > 1) {
+          const inv = 1 / Math.sqrt(hd2);
+          const strength = MAX_FORCE * 6.0 * (1 - Math.sqrt(hd2) / HAWK_FLEE);
+          ax += hdx * inv * strength; ay += hdy * inv * strength;
+        }
+      }
+      const mdx = b.x - mouse.x, mdy = b.y - mouse.y, md2 = mdx * mdx + mdy * mdy;
+      if (md2 < 150 * 150 && md2 > 1) {
+        const inv = 1 / Math.sqrt(md2);
+        ax += mdx * inv * MAX_FORCE * 3.0; ay += mdy * inv * MAX_FORCE * 3.0;
+      }
+      ax += (Math.random() - 0.5) * MAX_FORCE * 0.5;
+      ay += (Math.random() - 0.5) * MAX_FORCE * 0.5;
+      b.vx += ax * k; b.vy += ay * k;
+      const [vx, vy] = limit(b.vx, b.vy, MAX_SPEED * (0.7 + 0.6 * b.z));
+      b.vx = vx; b.vy = vy;
+      b.x += b.vx * k; b.y += b.vy * k;
+      if (b.x < -12) b.x = w + 12; else if (b.x > w + 12) b.x = -12;
+      if (b.y < -12) b.y = h + 12; else if (b.y > h + 12) b.y = -12;
+    }
+
+    for (const hk of hawks) {
+      let target = null, best = HAWK_HUNT * HAWK_HUNT;
+      for (let i = 0; i < N; i += 3) {
+        const b = birds[i];
+        const dx = b.x - hk.x, dy = b.y - hk.y, d2 = dx * dx + dy * dy;
+        if (d2 < best) { best = d2; target = b; }
+      }
+      let ax = 0, ay = 0;
+      if (target) {
+        const dx = target.x - hk.x, dy = target.y - hk.y;
+        const d = Math.hypot(dx, dy) || 1;
+        const [sx, sy] = limit(dx / d * HAWK_SPEED - hk.vx, dy / d * HAWK_SPEED - hk.vy, HAWK_FORCE);
+        ax += sx; ay += sy;
+      } else {
+        ax += (Math.random() - 0.5) * HAWK_FORCE * 1.2;
+        ay += (Math.random() - 0.5) * HAWK_FORCE * 1.2;
+      }
+      hk.vx += ax * k; hk.vy += ay * k;
+      const [hvx, hvy] = limit(hk.vx, hk.vy, HAWK_SPEED);
+      hk.vx = hvx; hk.vy = hvy;
+      hk.x += hk.vx * k; hk.y += hk.vy * k;
+      if (hk.x < -20) hk.x = w + 20; else if (hk.x > w + 20) hk.x = -20;
+      if (hk.y < -20) hk.y = h + 20; else if (hk.y > h + 20) hk.y = -20;
+    }
+
+    for (let i = 0; i < N; i++) drawBird(birds[i]);
+    for (const hk of hawks) drawHawk(hk);
+
+    g.save();
+    g.font = "11px 'Segoe UI', system-ui, sans-serif";
+    g.fillStyle = 'rgba(255,255,255,0.22)';
+    g.textAlign = 'left';
+    g.fillText('DEEPSEEK HARNESS', 26, 32);
+    g.restore();
+
+    raf = requestAnimationFrame(step);
+  }
+  last = performance.now();
+  raf = requestAnimationFrame(step);
+  window.addEventListener('mousemove', (e) => { mouse.x = e.clientX; mouse.y = e.clientY; });
+
+  /* ---------- 锁屏 UI ---------- */
+  const panel = document.getElementById('panel');
+  const pw = document.getElementById('pw');
+  const err = document.getElementById('err');
+  const sub = document.getElementById('sub');
+  const modal = document.getElementById('modal');
+  const pwerr = document.getElementById('pwerr');
+  const cur = document.getElementById('cur');
+  const n1 = document.getElementById('new1');
+  const n2 = document.getElementById('new2');
+  let locked = true;
+
+  function refresh() {
+    sub.textContent = isDefault
+      ? '输入密码解锁（默认密码 1234，可在下方修改）'
+      : '输入密码解锁';
+    setTimeout(() => pw.focus(), 50);
+  }
+  refresh();
+
+  function unlock() {
+    locked = false;
+    panel.style.display = 'none';
+  }
+  function lock() {
+    locked = true;
+    panel.style.display = 'flex';
+    pw.value = '';
+    err.textContent = '';
+    refresh();
+  }
+
+  document.getElementById('unlock').addEventListener('click', () => {
+    if (pw.value === password) unlock();
+    else { err.textContent = '密码错误'; pw.value = ''; pw.focus(); }
+  });
+  pw.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') document.getElementById('unlock').click();
+  });
+
+  function openModal() {
+    modal.classList.add('open');
+    cur.value = ''; n1.value = ''; n2.value = '';
+    pwerr.textContent = '';
+    setTimeout(() => cur.focus(), 50);
+  }
+  function closeModal() {
+    modal.classList.remove('open');
+    setTimeout(() => pw.focus(), 50);
+  }
+  function savePassword() {
+    if (cur.value !== password) { pwerr.textContent = '当前密码错误'; cur.value = ''; cur.focus(); return; }
+    if (n1.value.length < 4) { pwerr.textContent = '新密码至少 4 位'; n1.focus(); return; }
+    if (n1.value !== n2.value) { pwerr.textContent = '两次输入的新密码不一致'; n2.value = ''; n2.focus(); return; }
+    password = n1.value;
+    isDefault = false;
+    closeModal();
+    err.textContent = '密码已更新';
+    err.className = 'ok';
+    setTimeout(() => { err.textContent = ''; err.className = 'err'; }, 2500);
+  }
+
+  document.getElementById('setpw').addEventListener('click', openModal);
+  document.getElementById('pwsave').addEventListener('click', savePassword);
+  document.getElementById('pwcancel').addEventListener('click', closeModal);
+  [cur, n1, n2].forEach((inp) => {
+    inp.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') savePassword();
+      if (e.key === 'Escape') closeModal();
+    });
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && (e.key === 'L' || e.key === 'l')) { e.preventDefault(); if (!locked) lock(); return; }
+    if (modal.classList.contains('open')) return;
+    if (locked && e.target !== pw) { e.preventDefault(); pw.focus(); }
+  }, true);
+})();
+</script>
+</body>
+</html>

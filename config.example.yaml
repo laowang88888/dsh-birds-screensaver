@@ -1,0 +1,13 @@
+# Example registration block for ~/.dsh/profiles/desktop/cordis.patch.yml
+#
+# IMPORTANT: new plugins MUST be added through the `insert` form.
+# A bare `- id: ...` row only overrides an existing entry; an unknown id is
+# silently skipped by the DSH Loader (it only logs a warning).
+#
+# `install.mjs` appends this automatically; edit the values after installing.
+- insert:
+    - id: birds-screensaver
+      name: "@local/birds-screensaver"
+      config:
+        defaultPassword: "1234"   # default unlock password
+        idleMs: 180000            # idle timeout before locking, in ms (>= 10000)

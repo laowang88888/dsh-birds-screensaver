@@ -5,7 +5,9 @@
 > **English summary**: A boids flock screensaver and password lock screen for the DeepSeek Harness desktop app. Clone, run `node install.mjs`, restart DSH. Configurable default password and idle timeout.
 
 <p align="center">
-  <a href="preview.html"><b>▶ 打开静态预览（preview.html）</b></a>
+  <a href="https://laowang88888.github.io/dsh-birds-screensaver/"><b>▶ 在线预览（GitHub Pages）</b></a>
+  &nbsp;·&nbsp;
+  <a href="preview.html">本地预览 preview.html</a>
 </p>
 
 ---
